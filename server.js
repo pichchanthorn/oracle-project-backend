@@ -3,6 +3,8 @@ const express = require('express');
 const cors = require('cors');
 const { initPool } = require('./db');
 const categoriesRouter = require('./routes/categories');
+const unitsRouter = require('./routes/units');
+const productsRouter = require('./routes/products');
 
 const app = express();
 app.use(cors());
@@ -13,6 +15,8 @@ app.get('/', (req, res) => {
 });
 
 app.use('/api/categories', categoriesRouter);
+app.use('/api/units', unitsRouter);
+app.use('/api/products', productsRouter);
 
 const PORT = process.env.PORT || 3000;
 
