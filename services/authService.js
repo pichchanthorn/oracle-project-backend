@@ -249,4 +249,11 @@ async function verifyTwoFactorLogin({ challengeToken, twoFactorCode }) {
   };
 }
 
-module.exports = { login, LOGIN_RESULT, getMaxFailedAttempts, verifyTwoFactorLogin, VERIFY_LOGIN_RESULT };
+module.exports = {
+  login,
+  LOGIN_RESULT,
+  getMaxFailedAttempts,
+  verifyTwoFactorLogin,
+  VERIFY_LOGIN_RESULT,
+  isCurrentlyLockedOut,
+};
