@@ -2,6 +2,7 @@ const express = require('express');
 const oracledb = require('oracledb');
 const router = express.Router();
 const { getConnection } = require('../db');
+const { requireRole } = require('../middleware/roles');
 
 // GET /api/categories — list every category
 router.get('/', async (req, res) => {
@@ -28,8 +29,8 @@ router.get('/', async (req, res) => {
   }
 });
 
-// POST /api/categories — create a new category
-router.post('/', async (req, res) => {
+// POST /api/categories — create a new category (ADMIN only)
+router.post('/', requireRole('ADMIN'), async (req, res) => {
   const { name, description, active } = req.body;
 
   if (!name || !name.trim()) {
@@ -66,8 +67,8 @@ router.post('/', async (req, res) => {
   }
 });
 
-// PATCH /api/categories/:id/toggle — flip active/inactive
-router.patch('/:id/toggle', async (req, res) => {
+// PATCH /api/categories/:id/toggle — flip active/inactive (ADMIN only)
+router.patch('/:id/toggle', requireRole('ADMIN'), async (req, res) => {
   const { id } = req.params;
 
   let conn;

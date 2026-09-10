@@ -2,6 +2,7 @@ const express = require('express');
 const oracledb = require('oracledb');
 const router = express.Router();
 const { getConnection } = require('../db');
+const { requireRole } = require('../middleware/roles');
 
 // GET /api/units — list every unit
 router.get('/', async (req, res) => {
@@ -27,8 +28,8 @@ router.get('/', async (req, res) => {
   }
 });
 
-// POST /api/units — create a new unit
-router.post('/', async (req, res) => {
+// POST /api/units — create a new unit (ADMIN only)
+router.post('/', requireRole('ADMIN'), async (req, res) => {
   const { name, symbol } = req.body;
 
   if (!name || !name.trim()) {
@@ -66,8 +67,8 @@ router.post('/', async (req, res) => {
   }
 });
 
-// PATCH /api/units/:id — update name and/or symbol
-router.patch('/:id', async (req, res) => {
+// PATCH /api/units/:id — update name and/or symbol (ADMIN only)
+router.patch('/:id', requireRole('ADMIN'), async (req, res) => {
   const { id } = req.params;
   const { name, symbol } = req.body;
 

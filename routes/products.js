@@ -2,6 +2,7 @@ const express = require('express');
 const oracledb = require('oracledb');
 const router = express.Router();
 const { getConnection } = require('../db');
+const { requireRole } = require('../middleware/roles');
 
 const ORA_UNIQUE_VIOLATION = 1;
 const ORA_FK_VIOLATION_CHILD = 2291; // parent key not found (invalid category/unit)
@@ -43,8 +44,8 @@ router.get('/', async (req, res) => {
   }
 });
 
-// POST /api/products — create a new product
-router.post('/', async (req, res) => {
+// POST /api/products — create a new product (ADMIN, MANAGER)
+router.post('/', requireRole('ADMIN', 'MANAGER'), async (req, res) => {
   const { sku, name, categoryId, unitId, unitPrice, description, active } = req.body;
 
   if (!sku || !sku.trim()) {
@@ -110,8 +111,8 @@ router.post('/', async (req, res) => {
   }
 });
 
-// PATCH /api/products/:id — partial update
-router.patch('/:id', async (req, res) => {
+// PATCH /api/products/:id — partial update (ADMIN, MANAGER)
+router.patch('/:id', requireRole('ADMIN', 'MANAGER'), async (req, res) => {
   const { id } = req.params;
   const { sku, name, categoryId, unitId, unitPrice, description, active } = req.body;
 
