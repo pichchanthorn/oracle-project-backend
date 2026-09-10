@@ -23,4 +23,11 @@ async function getConnection() {
   return pool.getConnection();
 }
 
-module.exports = { initPool, getConnection };
+async function closePool() {
+  if (pool) {
+    await pool.close(0);
+    pool = undefined;
+  }
+}
+
+module.exports = { initPool, getConnection, closePool };
