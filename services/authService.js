@@ -1,8 +1,10 @@
 const bcrypt = require('bcrypt');
 const oracledb = require('oracledb');
+const { TokenExpiredError } = require('jsonwebtoken');
 const { getConnection } = require('../db');
-const { findByUsername } = require('./userService');
+const { findByUsername, findById } = require('./userService');
 const jwtService = require('./jwtService');
+const totpService = require('./totpService');
 
 // A bcrypt hash of an arbitrary, unrelated string — not a real password or a
 // secret. Used only so that an unknown-username login still runs a bcrypt
@@ -150,4 +152,101 @@ async function login({ username, password }) {
   };
 }
 
-module.exports = { login, LOGIN_RESULT, getMaxFailedAttempts };
+const VERIFY_LOGIN_RESULT = {
+  INVALID_CHALLENGE: 'invalid_challenge',
+  EXPIRED_CHALLENGE: 'expired_challenge',
+  INACTIVE_USER: 'inactive_user',
+  LOCKED: 'locked',
+  TWO_FACTOR_DISABLED: 'two_factor_disabled',
+  MISSING_SECRET: 'missing_secret',
+  INVALID_SECRET: 'invalid_secret',
+  INVALID_CODE: 'invalid_code',
+  SUCCESS: 'success',
+};
+
+// Completes a password+TOTP login: verifies the challenge token (signature,
+// HS256, issuer, audience, expiration, clock tolerance, token_type), reloads
+// the user fresh from Oracle (the challenge token's claims are a snapshot
+// from password-verification time and must never be trusted as current
+// security state — the account may have been deactivated, locked, or had
+// 2FA disabled since the challenge was issued), then verifies the submitted
+// TOTP code against the decrypted stored secret. Only on full success does
+// it issue a normal access token with amr: ['pwd', 'mfa'].
+//
+// Never throws for expected failure outcomes (bad/expired challenge,
+// inactive user, disabled 2FA, missing/corrupt secret, wrong code) — only
+// for genuinely unexpected failures, which the route maps to a generic 500.
+// Callers are responsible for recording the audit event and shaping the
+// HTTP response.
+async function verifyTwoFactorLogin({ challengeToken, twoFactorCode }) {
+  let claims;
+  try {
+    claims = jwtService.verifyTokenOfType(challengeToken, jwtService.TOKEN_TYPE_TWO_FACTOR_CHALLENGE);
+  } catch (err) {
+    const outcome =
+      err instanceof TokenExpiredError
+        ? VERIFY_LOGIN_RESULT.EXPIRED_CHALLENGE
+        : VERIFY_LOGIN_RESULT.INVALID_CHALLENGE;
+    return { outcome };
+  }
+
+  // claims.sub is always a string (see jwtService.js's baseClaims) — never
+  // pass it into an Oracle NUMBER bind or an audit call unconverted. This is
+  // exactly the NJS-011 class of bug Phase 4 hit; convert once, here.
+  const userId = Number(claims.sub);
+  if (!Number.isInteger(userId)) {
+    return { outcome: VERIFY_LOGIN_RESULT.INVALID_CHALLENGE };
+  }
+
+  const user = await findById(userId);
+  if (!user) {
+    return { outcome: VERIFY_LOGIN_RESULT.INVALID_CHALLENGE, userId };
+  }
+
+  if (!user.active) {
+    return { outcome: VERIFY_LOGIN_RESULT.INACTIVE_USER, userId };
+  }
+
+  if (isCurrentlyLockedOut(user)) {
+    return { outcome: VERIFY_LOGIN_RESULT.LOCKED, userId };
+  }
+
+  if (!user.twoFactorEnabled) {
+    return { outcome: VERIFY_LOGIN_RESULT.TWO_FACTOR_DISABLED, userId };
+  }
+
+  if (!user.twoFactorSecret) {
+    return { outcome: VERIFY_LOGIN_RESULT.MISSING_SECRET, userId };
+  }
+
+  let plaintextSecret;
+  try {
+    plaintextSecret = totpService.decryptSecret(user.twoFactorSecret);
+  } catch {
+    // Stored secret is unusable (corrupted/tampered, or encrypted under a
+    // rotated key) — fail safely, never leak decryption detail.
+    return { outcome: VERIFY_LOGIN_RESULT.INVALID_SECRET, userId };
+  }
+
+  const isValid = await totpService.verifyCode({ secret: plaintextSecret, code: twoFactorCode });
+  if (!isValid) {
+    return { outcome: VERIFY_LOGIN_RESULT.INVALID_CODE, userId };
+  }
+
+  const safeUser = {
+    id: user.id,
+    username: user.username,
+    fullName: user.fullName,
+    email: user.email,
+    role: user.role,
+  };
+
+  return {
+    outcome: VERIFY_LOGIN_RESULT.SUCCESS,
+    userId,
+    user: safeUser,
+    accessToken: jwtService.signAccessToken(safeUser, { amr: ['pwd', 'mfa'] }),
+  };
+}
+
+module.exports = { login, LOGIN_RESULT, getMaxFailedAttempts, verifyTwoFactorLogin, VERIFY_LOGIN_RESULT };
