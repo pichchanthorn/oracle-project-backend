@@ -159,4 +159,130 @@ router.post('/enable', async (req, res) => {
   });
 });
 
+// POST /api/auth/2fa/disable — same access-token/identity rules as
+// /setup and /enable.
+router.post('/disable', async (req, res) => {
+  // See the /setup handler above for why this conversion is needed.
+  const userId = Number(req.user.id);
+  const ip = req.ip;
+  const userAgent = req.headers['user-agent'] || null;
+  const { twoFactorCode } = req.body || {};
+
+  const { isWellFormedCode, DISABLE_RESULT } = twoFactorService;
+
+  if (!isWellFormedCode(twoFactorCode)) {
+    // Malformed input is rejected before any DB/crypto work.
+    await recordAuthEvent({
+      userId,
+      eventType: '2FA_DISABLED',
+      eventResult: 'FAILURE',
+      ip,
+      userAgent,
+      detail: 'invalid_code',
+    });
+    return res.status(400).json({ error: 'code must be exactly 6 digits' });
+  }
+
+  let result;
+  try {
+    result = await twoFactorService.disable(userId, twoFactorCode);
+  } catch (err) {
+    console.error(err);
+    await recordAuthEvent({
+      userId,
+      eventType: '2FA_DISABLED',
+      eventResult: 'FAILURE',
+      ip,
+      userAgent,
+      detail: 'internal_error',
+    });
+    return res.status(500).json({ error: '2FA disable failed' });
+  }
+
+  if (result.outcome === DISABLE_RESULT.INACTIVE_USER) {
+    await recordAuthEvent({
+      userId,
+      eventType: '2FA_DISABLED',
+      eventResult: 'FAILURE',
+      ip,
+      userAgent,
+      detail: 'inactive_user',
+    });
+    return res.status(401).json({ error: 'Unable to process request' });
+  }
+
+  if (result.outcome === DISABLE_RESULT.LOCKED) {
+    await recordAuthEvent({
+      userId,
+      eventType: '2FA_DISABLED',
+      eventResult: 'FAILURE',
+      ip,
+      userAgent,
+      detail: 'account_unavailable',
+    });
+    return res.status(401).json({ error: 'Unable to process request' });
+  }
+
+  if (result.outcome === DISABLE_RESULT.ALREADY_DISABLED) {
+    await recordAuthEvent({
+      userId,
+      eventType: '2FA_DISABLED',
+      eventResult: 'FAILURE',
+      ip,
+      userAgent,
+      detail: 'already_disabled',
+    });
+    return res.status(409).json({ error: '2FA is already disabled' });
+  }
+
+  if (result.outcome === DISABLE_RESULT.MISSING_SECRET) {
+    await recordAuthEvent({
+      userId,
+      eventType: '2FA_DISABLED',
+      eventResult: 'FAILURE',
+      ip,
+      userAgent,
+      detail: 'missing_secret',
+    });
+    return res.status(401).json({ error: 'Unable to process request' });
+  }
+
+  if (result.outcome === DISABLE_RESULT.INVALID_SECRET) {
+    await recordAuthEvent({
+      userId,
+      eventType: '2FA_DISABLED',
+      eventResult: 'FAILURE',
+      ip,
+      userAgent,
+      detail: 'invalid_secret',
+    });
+    return res.status(401).json({ error: 'Unable to process request' });
+  }
+
+  if (result.outcome === DISABLE_RESULT.INVALID_CODE) {
+    await recordAuthEvent({
+      userId,
+      eventType: '2FA_DISABLED',
+      eventResult: 'FAILURE',
+      ip,
+      userAgent,
+      detail: 'invalid_code',
+    });
+    return res.status(400).json({ error: 'Invalid verification code' });
+  }
+
+  // result.outcome === DISABLE_RESULT.SUCCESS. Response sent before the
+  // fire-and-forget audit call, for the same reason as /setup and /enable
+  // above — a slow or failing audit write can never turn a successful
+  // disable into an error response.
+  res.status(200).json({ success: true });
+  recordAuthEvent({
+    userId,
+    eventType: '2FA_DISABLED',
+    eventResult: 'SUCCESS',
+    ip,
+    userAgent,
+  });
+});
+
 module.exports = router;
