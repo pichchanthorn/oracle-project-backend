@@ -129,4 +129,42 @@ async function findByUsername(username) {
   }
 }
 
-module.exports = { createUser, DuplicateFieldError, findByUsername };
+// Lookup by USER_ID (the only identity source for an authenticated request —
+// see middleware/auth.js, which derives req.user.id from the verified JWT
+// `sub` claim, never from the request body). Returns the same shape as
+// findByUsername so callers can treat both lookups interchangeably.
+async function findById(userId) {
+  let conn;
+  try {
+    conn = await getConnection();
+    const result = await conn.execute(
+      `SELECT user_id, username, password_hash, full_name, email, role,
+              is_active, failed_login_count, lockout_end_at, two_factor_enabled,
+              two_factor_secret
+       FROM users
+       WHERE user_id = :userId`,
+      { userId }
+    );
+
+    const row = result.rows[0];
+    if (!row) return null;
+
+    return {
+      id: row.USER_ID,
+      username: row.USERNAME,
+      passwordHash: row.PASSWORD_HASH,
+      fullName: row.FULL_NAME,
+      email: row.EMAIL,
+      role: row.ROLE,
+      active: row.IS_ACTIVE === 1,
+      failedLoginCount: row.FAILED_LOGIN_COUNT,
+      lockoutEndAt: row.LOCKOUT_END_AT,
+      twoFactorEnabled: row.TWO_FACTOR_ENABLED === 1,
+      twoFactorSecret: row.TWO_FACTOR_SECRET,
+    };
+  } finally {
+    if (conn) await conn.close();
+  }
+}
+
+module.exports = { createUser, DuplicateFieldError, findByUsername, findById };
