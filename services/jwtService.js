@@ -70,14 +70,14 @@ function getConfig() {
   return cachedConfig;
 }
 
-function baseClaims(user) {
+function baseClaims(user, amr = ['pwd']) {
   return {
     sub: String(user.id),
     username: user.username,
     email: user.email,
     role: user.role,
     jti: crypto.randomUUID(),
-    amr: ['pwd'],
+    amr,
   };
 }
 
@@ -91,10 +91,14 @@ function signToken(claims, expiresInSeconds) {
   });
 }
 
-function signAccessToken(user) {
+// `amr` defaults to ['pwd'] (password-only login) for backward
+// compatibility with existing callers (authService.js's password-only
+// login path). Phase 5 passes { amr: ['pwd', 'mfa'] } after a successful
+// TOTP verification — see routes/auth.js's /verify-login handler.
+function signAccessToken(user, { amr } = {}) {
   const config = getConfig();
   return signToken(
-    { ...baseClaims(user), token_type: TOKEN_TYPE_ACCESS },
+    { ...baseClaims(user, amr), token_type: TOKEN_TYPE_ACCESS },
     config.accessTokenExpirationSeconds
   );
 }
