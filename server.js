@@ -1,6 +1,14 @@
 require('dotenv').config();
 const app = require('./app');
 const { initPool } = require('./db');
+const jwtService = require('./services/jwtService');
+
+try {
+  jwtService.validateConfig();
+} catch (err) {
+  console.error('Invalid JWT configuration:', err.message);
+  process.exit(1);
+}
 
 const PORT = process.env.PORT || 3000;
 

@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { createUser, DuplicateFieldError } = require('../services/userService');
+const authService = require('../services/authService');
 const authAuditService = require('../services/authAuditService');
 
 // Called through the module object (not destructured) so tests can spy on
@@ -124,6 +125,124 @@ router.post('/register', async (req, res) => {
     userId: user.id,
     usernameAttempted: trimmedUsername,
     eventType: 'REGISTER_SUCCESS',
+    eventResult: 'SUCCESS',
+    ip,
+    userAgent,
+  });
+});
+
+function validateLogin({ username, password }) {
+  if (typeof username !== 'string' || !username.trim()) {
+    return 'username is required';
+  }
+  if (typeof password !== 'string' || !password) {
+    return 'password is required';
+  }
+  return null;
+}
+
+// POST /api/auth/login — public. Unknown username, inactive account, and
+// wrong password all produce the identical 401 response below; only a
+// currently-locked account differs (423), which is an explicit, approved
+// exception to the no-enumeration rule (an attacker who already knows a
+// locked username learns nothing they couldn't infer from repeated lockouts
+// anyway). See services/authService.js for the lockout/timing logic itself.
+router.post('/login', async (req, res) => {
+  const { username, password } = req.body || {};
+  const ip = req.ip;
+  const userAgent = req.headers['user-agent'] || null;
+
+  const validationError = validateLogin({ username, password });
+  if (validationError) {
+    await recordAuthEvent({
+      usernameAttempted: typeof username === 'string' ? username.trim() : null,
+      eventType: 'LOGIN_FAILURE',
+      eventResult: 'FAILURE',
+      ip,
+      userAgent,
+      detail: 'validation_error',
+    });
+    return res.status(400).json({ error: validationError });
+  }
+
+  const trimmedUsername = username.trim();
+
+  let result;
+  try {
+    result = await authService.login({ username: trimmedUsername, password });
+  } catch (err) {
+    console.error(err);
+    await recordAuthEvent({
+      usernameAttempted: trimmedUsername,
+      eventType: 'LOGIN_FAILURE',
+      eventResult: 'FAILURE',
+      ip,
+      userAgent,
+      detail: 'internal_error',
+    });
+    return res.status(500).json({ error: 'Login failed' });
+  }
+
+  const { LOGIN_RESULT } = authService;
+
+  if (result.outcome === LOGIN_RESULT.INVALID_CREDENTIALS) {
+    const locked = result.lockedOut === true;
+    await recordAuthEvent({
+      userId: result.user ? result.user.id : null,
+      usernameAttempted: trimmedUsername,
+      eventType: locked ? 'ACCOUNT_LOCKOUT' : 'LOGIN_FAILURE',
+      eventResult: 'FAILURE',
+      ip,
+      userAgent,
+      detail: locked ? 'lockout_threshold_reached' : 'invalid_credentials',
+    });
+
+    if (locked) {
+      return res.status(423).json({ error: 'Account is locked. Try again later.' });
+    }
+    return res.status(401).json({ error: 'Invalid username or password' });
+  }
+
+  if (result.outcome === LOGIN_RESULT.LOCKED) {
+    await recordAuthEvent({
+      userId: result.user.id,
+      usernameAttempted: trimmedUsername,
+      eventType: 'LOGIN_FAILURE',
+      eventResult: 'FAILURE',
+      ip,
+      userAgent,
+      detail: 'account_locked',
+    });
+    return res.status(423).json({ error: 'Account is locked. Try again later.' });
+  }
+
+  if (result.outcome === LOGIN_RESULT.SUCCESS_CHALLENGE) {
+    res.status(200).json({
+      requiresTwoFactor: true,
+      challengeToken: result.challengeToken,
+      user: result.user,
+    });
+    recordAuthEvent({
+      userId: result.user.id,
+      usernameAttempted: trimmedUsername,
+      eventType: 'PASSWORD_VERIFIED_2FA_REQUIRED',
+      eventResult: 'SUCCESS',
+      ip,
+      userAgent,
+    });
+    return;
+  }
+
+  // LOGIN_RESULT.SUCCESS_ACCESS
+  res.status(200).json({
+    requiresTwoFactor: false,
+    accessToken: result.accessToken,
+    user: result.user,
+  });
+  recordAuthEvent({
+    userId: result.user.id,
+    usernameAttempted: trimmedUsername,
+    eventType: 'LOGIN_SUCCESS',
     eventResult: 'SUCCESS',
     ip,
     userAgent,

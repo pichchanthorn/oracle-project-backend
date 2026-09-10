@@ -93,4 +93,40 @@ async function createUser({ username, password, fullName, email }) {
   }
 }
 
-module.exports = { createUser, DuplicateFieldError };
+// Case-insensitive username lookup for login. Returns only the fields the
+// auth service needs (including password_hash, required for bcrypt
+// verification) — callers outside the auth flow should not need this
+// function, and nothing here is ever sent back in an HTTP response as-is.
+async function findByUsername(username) {
+  let conn;
+  try {
+    conn = await getConnection();
+    const result = await conn.execute(
+      `SELECT user_id, username, password_hash, full_name, email, role,
+              is_active, failed_login_count, lockout_end_at, two_factor_enabled
+       FROM users
+       WHERE UPPER(username) = UPPER(:username)`,
+      { username }
+    );
+
+    const row = result.rows[0];
+    if (!row) return null;
+
+    return {
+      id: row.USER_ID,
+      username: row.USERNAME,
+      passwordHash: row.PASSWORD_HASH,
+      fullName: row.FULL_NAME,
+      email: row.EMAIL,
+      role: row.ROLE,
+      active: row.IS_ACTIVE === 1,
+      failedLoginCount: row.FAILED_LOGIN_COUNT,
+      lockoutEndAt: row.LOCKOUT_END_AT,
+      twoFactorEnabled: row.TWO_FACTOR_ENABLED === 1,
+    };
+  } finally {
+    if (conn) await conn.close();
+  }
+}
+
+module.exports = { createUser, DuplicateFieldError, findByUsername };
