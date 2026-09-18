@@ -3,6 +3,7 @@ const cors = require('cors');
 const categoriesRouter = require('./routes/categories');
 const unitsRouter = require('./routes/units');
 const productsRouter = require('./routes/products');
+const inventoryRouter = require('./routes/inventory');
 const authRouter = require('./routes/auth');
 const twoFactorRouter = require('./routes/twoFactor');
 const { requireAccessToken } = require('./middleware/auth');
@@ -33,5 +34,6 @@ app.use('/api', requireAccessToken);
 app.use('/api/categories', categoriesRouter);
 app.use('/api/units', unitsRouter);
 app.use('/api/products', productsRouter);
+app.use('/api/inventory', inventoryRouter);
 
 module.exports = app;
