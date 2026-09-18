@@ -6,9 +6,10 @@ const productsRouter = require('./routes/products');
 const authRouter = require('./routes/auth');
 const twoFactorRouter = require('./routes/twoFactor');
 const { requireAccessToken } = require('./middleware/auth');
+const corsService = require('./services/corsService');
 
 const app = express();
-app.use(cors());
+app.use(cors({ origin: corsService.getOrigin() }));
 app.use(express.json());
 
 app.get('/', (req, res) => {

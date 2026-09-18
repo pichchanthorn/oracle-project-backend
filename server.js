@@ -3,6 +3,7 @@ const app = require('./app');
 const { initPool } = require('./db');
 const jwtService = require('./services/jwtService');
 const cryptoService = require('./services/cryptoService');
+const corsService = require('./services/corsService');
 
 try {
   jwtService.validateConfig();
@@ -15,6 +16,13 @@ try {
   cryptoService.validateConfig();
 } catch (err) {
   console.error('Invalid TOTP encryption configuration:', err.message);
+  process.exit(1);
+}
+
+try {
+  corsService.validateConfig();
+} catch (err) {
+  console.error('Invalid CORS configuration:', err.message);
   process.exit(1);
 }
 

@@ -3,6 +3,9 @@ const oracledb = require('oracledb');
 const router = express.Router();
 const { getConnection } = require('../db');
 const { requireRole } = require('../middleware/roles');
+const { parsePositiveIntegerId } = require('../utils/validateId');
+
+const ORA_UNIQUE_VIOLATION = 1;
 
 // GET /api/categories — list every category
 router.get('/', async (req, res) => {
@@ -60,6 +63,9 @@ router.post('/', requireRole('ADMIN'), async (req, res) => {
       active: active !== false,
     });
   } catch (err) {
+    if (err.errorNum === ORA_UNIQUE_VIOLATION) {
+      return res.status(409).json({ error: 'A category with this name already exists' });
+    }
     console.error(err);
     res.status(500).json({ error: 'Failed to create category' });
   } finally {
@@ -69,16 +75,24 @@ router.post('/', requireRole('ADMIN'), async (req, res) => {
 
 // PATCH /api/categories/:id/toggle — flip active/inactive (ADMIN only)
 router.patch('/:id/toggle', requireRole('ADMIN'), async (req, res) => {
-  const { id } = req.params;
+  const id = parsePositiveIntegerId(req.params.id);
+  if (id === null) {
+    return res.status(400).json({ error: 'id must be a positive integer' });
+  }
 
   let conn;
   try {
     conn = await getConnection();
-    await conn.execute(
+    const result = await conn.execute(
       `UPDATE categories SET is_active = 1 - is_active WHERE category_id = :id`,
       { id },
       { autoCommit: true }
     );
+
+    if (result.rowsAffected === 0) {
+      return res.status(404).json({ error: 'Category not found' });
+    }
+
     res.json({ success: true });
   } catch (err) {
     console.error(err);

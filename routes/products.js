@@ -3,9 +3,19 @@ const oracledb = require('oracledb');
 const router = express.Router();
 const { getConnection } = require('../db');
 const { requireRole } = require('../middleware/roles');
+const { parsePositiveIntegerId } = require('../utils/validateId');
 
 const ORA_UNIQUE_VIOLATION = 1;
 const ORA_FK_VIOLATION_CHILD = 2291; // parent key not found (invalid category/unit)
+
+// Accepts JSON numbers only (typeof === 'number'), must be finite, must be
+// >= 0. Rejects booleans, arrays, null, numeric strings, whitespace
+// strings, hex strings, Infinity, and NaN — all of which are otherwise
+// "truthy-ish" under Number(value) coercion and would previously pass the
+// looser isNaN(Number(value)) check. unitPrice === 0 is valid.
+function isValidUnitPrice(value) {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
 
 // GET /api/products — list every product
 router.get('/', async (req, res) => {
@@ -63,7 +73,7 @@ router.post('/', requireRole('ADMIN', 'MANAGER'), async (req, res) => {
   if (unitPrice === undefined || unitPrice === null || unitPrice === '') {
     return res.status(400).json({ error: 'unitPrice is required' });
   }
-  if (isNaN(Number(unitPrice)) || Number(unitPrice) < 0) {
+  if (!isValidUnitPrice(unitPrice)) {
     return res.status(400).json({ error: 'unitPrice must be a number >= 0' });
   }
 
@@ -113,7 +123,10 @@ router.post('/', requireRole('ADMIN', 'MANAGER'), async (req, res) => {
 
 // PATCH /api/products/:id — partial update (ADMIN, MANAGER)
 router.patch('/:id', requireRole('ADMIN', 'MANAGER'), async (req, res) => {
-  const { id } = req.params;
+  const id = parsePositiveIntegerId(req.params.id);
+  if (id === null) {
+    return res.status(400).json({ error: 'id must be a positive integer' });
+  }
   const { sku, name, categoryId, unitId, unitPrice, description, active } = req.body;
 
   if (sku !== undefined && !sku.trim()) {
@@ -128,10 +141,8 @@ router.patch('/:id', requireRole('ADMIN', 'MANAGER'), async (req, res) => {
   if (unitId !== undefined && (unitId === null || unitId === '')) {
     return res.status(400).json({ error: 'unitId cannot be empty' });
   }
-  if (unitPrice !== undefined) {
-    if (unitPrice === null || unitPrice === '' || isNaN(Number(unitPrice)) || Number(unitPrice) < 0) {
-      return res.status(400).json({ error: 'unitPrice must be a number >= 0' });
-    }
+  if (unitPrice !== undefined && !isValidUnitPrice(unitPrice)) {
+    return res.status(400).json({ error: 'unitPrice must be a number >= 0' });
   }
   if (
     sku === undefined &&
@@ -192,5 +203,12 @@ router.patch('/:id', requireRole('ADMIN', 'MANAGER'), async (req, res) => {
     if (conn) await conn.close();
   }
 });
+
+// Exported for direct unit testing of the Infinity/NaN cases, which cannot
+// be transmitted as JSON over HTTP (JSON.stringify(Infinity/NaN) === 'null')
+// and so cannot be exercised through the route-level tests alone. Does not
+// change how app.js or any other consumer uses this module — router is
+// still the default export, usable exactly as before.
+router.isValidUnitPrice = isValidUnitPrice;
 
 module.exports = router;
