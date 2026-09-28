@@ -322,6 +322,33 @@ router.get('/', async (req, res) => {
   }
 });
 
+// GET /api/sales/summary — dashboard aggregate metrics (any authenticated
+// role). Declared before GET /:id so "summary" is never parsed as a sale id.
+router.get('/summary', async (req, res) => {
+  let conn;
+  try {
+    conn = await getConnection();
+    const result = await conn.execute(
+      `SELECT NVL(SUM(total_amount), 0) AS total_sales,
+              COUNT(*) AS sales_count,
+              NVL(AVG(total_amount), 0) AS average_sale
+       FROM sales`
+    );
+
+    const row = result.rows[0];
+    res.json({
+      totalSales: row.TOTAL_SALES,
+      salesCount: row.SALES_COUNT,
+      averageSale: row.AVERAGE_SALE,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch sales summary' });
+  } finally {
+    if (conn) await conn.close();
+  }
+});
+
 // GET /api/sales/:id — sale header + items (any authenticated role).
 router.get('/:id', async (req, res) => {
   const id = parsePositiveIntegerId(req.params.id);
